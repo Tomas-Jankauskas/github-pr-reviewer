@@ -26,13 +26,43 @@ export class ReviewManager {
 
     // Analyze each file
     for (const file of files) {
-      // Add analyzers here
-      results.push({
-        type: 'style',
-        level: 'info',
-        message: `Reviewing ${file.filename}`,
-        file: file.filename
+      // Basic file size check
+      const content = await this.octokit.repos.getContent({
+        owner,
+        repo,
+        path: file.filename,
+        ref: pr.head.sha
       });
+
+      if ('content' in content.data) {
+        const fileContent = Buffer.from(content.data.content, 'base64').toString();
+        const lines = fileContent.split('\n');
+
+        // Check file length
+        if (lines.length > 300) {
+          results.push({
+            type: 'performance',
+            level: 'warning',
+            message: `File is quite long (${lines.length} lines). Consider breaking it into smaller modules.`,
+            file: file.filename,
+            line: 1
+          });
+        }
+
+        // Check line length
+        lines.forEach((line, index) => {
+          if (line.length > 100) {
+            results.push({
+              type: 'style',
+              level: 'info',
+              message: 'Line is too long. Consider breaking it into multiple lines.',
+              file: file.filename,
+              line: index + 1,
+              suggestion: 'Try to keep lines under 100 characters for better readability.'
+            });
+          }
+        });
+      }
     }
 
     return results;
