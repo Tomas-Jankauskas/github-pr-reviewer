@@ -26,49 +26,78 @@ export class ReviewManager {
 
     // Analyze each file
     for (const file of files) {
-      // Basic file size check
-      const content = await this.octokit.repos.getContent({
-        owner,
-        repo,
-        path: file.filename,
-        ref: pr.head.sha
-      });
+      // Only analyze files that were modified or added
+      if (file.status === 'removed') continue;
 
-      if ('content' in content.data) {
-        const fileContent = Buffer.from(content.data.content, 'base64').toString();
-        const lines = fileContent.split('\n');
+      // Get the patch lines
+      const patchLines = new Set<number>();
+      if (file.patch) {
+        const hunks = file.patch.split('@@');
+        for (let i = 1; i < hunks.length; i += 2) {
+          const hunkHeader = hunks[i];
+          const match = hunkHeader.match(/\+(\d+),?(\d+)?/);
+          if (match) {
+            const start = parseInt(match[1]);
+            const count = match[2] ? parseInt(match[2]) : 1;
+            for (let line = start; line < start + count; line++) {
+              patchLines.add(line);
+            }
+          }
+        }
+      }
 
-        // Check file length
-        if (lines.length > 300) {
+      // Check file length
+      if (file.additions > 300) {
+        const firstLine = Array.from(patchLines)[0];
+        if (firstLine) {
           results.push({
             type: 'performance',
             level: 'warning',
-            message: `File is quite long (${lines.length} lines). Consider breaking it into smaller modules.`,
+            message: `New changes add ${file.additions} lines. Consider breaking this into smaller modules.`,
             file: file.filename,
-            line: 1
+            line: firstLine
           });
         }
-
-        // Check line length
-        lines.forEach((line, index) => {
-          if (line.length > 100) {
-            results.push({
-              type: 'style',
-              level: 'info',
-              message: 'Line is too long. Consider breaking it into multiple lines.',
-              file: file.filename,
-              line: index + 1,
-              suggestion: 'Try to keep lines under 100 characters for better readability.'
-            });
-          }
-        });
       }
+
+      // Check line length in the patch
+      const patchContent = file.patch || '';
+      const patchLines2 = patchContent.split('\n');
+      let currentLine = 1;
+
+      patchLines2.forEach((line) => {
+        if (line.startsWith('+') && line.length > 100 && patchLines.has(currentLine)) {
+          results.push({
+            type: 'style',
+            level: 'info',
+            message: 'Line is too long. Consider breaking it into multiple lines.',
+            file: file.filename,
+            line: currentLine,
+            suggestion: 'Try to keep lines under 100 characters for better readability.'
+          });
+        }
+        if (line.startsWith('+')) {
+          currentLine++;
+        }
+      });
     }
 
     return results;
   }
 
   async submitReview(owner: string, repo: string, pullNumber: number, results: ReviewResult[]) {
+    if (results.length === 0) {
+      // If no issues found, submit a simple approval
+      await this.octokit.pulls.createReview({
+        owner,
+        repo,
+        pull_number: pullNumber,
+        event: 'APPROVE',
+        body: 'Code looks good! No style or performance issues found.'
+      });
+      return;
+    }
+
     const comments = results.map(result => ({
       path: result.file || '',
       line: result.line || 1,
