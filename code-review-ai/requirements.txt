@@ -1,6 +1,6 @@
 langchain==0.1.5
-langchain-core==0.2.43
-langchain-anthropic==0.1.23
+langchain-core==0.1.23
+langchain-anthropic==0.0.8
 langchain-community==0.0.20
 chromadb==0.4.22
 pydantic==2.6.1
